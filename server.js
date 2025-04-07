@@ -1,14 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import WebSocket from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 
 // Create WebSocket server to communicate with Chrome extension
-const wss = new WebSocket.Server({ port: 8080 });
+const wss = new WebSocketServer({ port: 8080 });
 let activeConnections = new Set();
 
 wss.on('connection', (ws) => {
-    console.log('Chrome extension connected');
+    // console.log('Chrome extension connected');
     activeConnections.add(ws);
 
     // Add error handler
@@ -18,7 +18,7 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        console.log('Chrome extension disconnected');
+        console.error("Chrome extension disconnected");
         cleanupConnection(ws);
     });
 
@@ -62,15 +62,13 @@ const server = new McpServer({
 
 // Add webpage query tool
 server.tool("query_current_page",
-    { 
-        query: z.string()
-    },
-    async ({ query }) => {
+    {},
+    async () => {
         if (activeConnections.size === 0) {
             return {
-                content: [{ 
-                    type: "text", 
-                    text: "Error: Chrome extension not connected. Please ensure the extension is running." 
+                content: [{
+                    type: "text",
+                    text: "Error: Chrome extension not connected. Please ensure the extension is running."
                 }]
             };
         }
@@ -78,14 +76,14 @@ server.tool("query_current_page",
         try {
             // Get first available connection
             const activeConnection = [...activeConnections][0];
-            
+
             // Request page source from Chrome extension
-            const response = await new Promise((resolve, reject) => {
+            const pageSource = await new Promise((resolve, reject) => {
                 // Check if connection is still valid
                 if (!safelySendMessage(activeConnection, { type: 'GET_PAGE_SOURCE' })) {
                     return reject(new Error('Failed to send message to extension'));
                 }
-                
+
                 const timeout = setTimeout(() => {
                     // Remove the message handler to avoid memory leaks
                     activeConnection.removeListener('message', messageHandler);
@@ -109,36 +107,17 @@ server.tool("query_current_page",
                 activeConnection.once('message', messageHandler);
             });
 
-            // Search through the page source
-            const lines = response.split('\n');
-            const matches = lines
-                .map((line, index) => ({ line, index: index + 1 }))
-                .filter(({ line }) => line.toLowerCase().includes(query.toLowerCase()));
-
-            if (matches.length === 0) {
-                return {
-                    content: [{ 
-                        type: "text", 
-                        text: "No matches found in the current page." 
-                    }]
-                };
-            }
-
-            const results = matches.map(({ line, index }) => 
-                `Line ${index}: ${line.trim()}`
-            );
-
             return {
-                content: [{ 
-                    type: "text", 
-                    text: `Found ${matches.length} matches in the current page:\n\n${results.join('\n')}` 
+                content: [{
+                    type: "text",
+                    text: pageSource
                 }]
             };
         } catch (error) {
             return {
-                content: [{ 
-                    type: "text", 
-                    text: `Error querying page: ${error.message}` 
+                content: [{
+                    type: "text",
+                    text: `Error retrieving page source: ${error.message}`
                 }]
             };
         }

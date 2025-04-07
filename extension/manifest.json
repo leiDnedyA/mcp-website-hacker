@@ -12,6 +12,7 @@
         "type": "module"
     },
     "host_permissions": [
-        "ws://localhost:8080/*"
+        "ws://localhost:8080/*",
+        "<all_urls>"
     ]
 } 

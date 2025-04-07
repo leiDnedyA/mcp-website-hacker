@@ -23,34 +23,34 @@ function connectToMcpServer() {
         };
 
         ws.onmessage = async (event) => {
-            const message = JSON.parse(event.data);
-            
-            if (message.type === 'GET_PAGE_SOURCE') {
-                try {
-                    // Get the active tab
-                    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                    
-                    if (!tab) {
-                        ws.send(JSON.stringify({ 
-                            error: 'No active tab found' 
-                        }));
-                        return;
-                    }
+            // Always return page source regardless of message content
+            try {
+                const tabs = await chrome.tabs.query({ active: true });
+                const tab = tabs?.[0];
 
-                    // Execute script to get page source
-                    const [{result}] = await chrome.scripting.executeScript({
-                        target: { tabId: tab.id },
-                        func: () => document.documentElement.outerHTML
-                    });
-
+                console.log(tab, tabs);
+                
+                if (!tab) {
                     ws.send(JSON.stringify({ 
-                        source: result 
+                        error: 'No active tab found' 
                     }));
-                } catch (error) {
-                    ws.send(JSON.stringify({ 
-                        error: error.message 
-                    }));
+                    return;
                 }
+
+                // Execute script to get page source
+                const [{result}] = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => document.documentElement.outerHTML
+                });
+
+                ws.send(JSON.stringify({ 
+                    source: result 
+                }));
+            } catch (error) {
+                console.error('Error getting page source:', error);
+                ws.send(JSON.stringify({ 
+                    error: error.message 
+                }));
             }
         };
 
@@ -72,18 +72,55 @@ connectToMcpServer();
 // Handle communication with the MCP server
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'QUERY_CODE') {
-        // In a real implementation, you would need to set up WebSocket or other
-        // communication with the MCP server. For now, we'll simulate the response
+        // Handle regular query
         handleMcpQuery(message.payload)
             .then(result => sendResponse({ result }))
             .catch(error => sendResponse({ error: error.message }));
         return true; // Required for async response
+    } else if (message.type === 'GET_PAGE_SOURCE' || message.query === 'GET_PAGE_SOURCE') {
+        // Handle page source request directly
+        getPageSource()
+            .then(source => sendResponse({ source }))
+            .catch(error => sendResponse({ error: error.message }));
+        return true;
+    } else if (message.type === 'MCP_CHROME_TAB_QUERY') {
+        if (message.query === 'GET_PAGE_SOURCE') {
+            getPageSource()
+                .then(source => sendResponse({ source }))
+                .catch(error => sendResponse({ error: error.message }));
+            return true; // Required for async response
+        }
     }
 });
 
+async function getPageSource() {
+    try {
+        // Get the active tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (!tab) {
+            throw new Error('No active tab found');
+        }
+
+        // Execute script to get page source
+        const [{result}] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => document.documentElement.outerHTML
+        });
+
+        return result;
+    } catch (error) {
+        throw error;
+    }
+}
+
 async function handleMcpQuery({ query, code, language }) {
-    // Here you would implement the actual communication with your MCP server
-    // For now, we'll do a simple text search to demonstrate the concept
+    // Check if this is a GET_PAGE_SOURCE request
+    if (query === 'GET_PAGE_SOURCE') {
+        return await getPageSource();
+    }
+    
+    // Otherwise, do a simple text search
     try {
         const lines = code.split('\n');
         const matches = lines
