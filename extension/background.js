@@ -25,6 +25,7 @@ function connectToMcpServer() {
         ws.onmessage = async (event) => {
             // Always return page source regardless of message content
             try {
+                const message = JSON.parse(event.data);
                 const tabs = await chrome.tabs.query({ active: true });
                 const tab = tabs?.[0];
 
@@ -37,17 +38,44 @@ function connectToMcpServer() {
                     return;
                 }
 
-                // Execute script to get page source
-                const [{result}] = await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    func: () => document.documentElement.outerHTML
-                });
+                // Handle different message types
+                if (message.type === 'UPDATE_HTML') {
+                    // Execute script to update HTML content
+                    const { selector, newContent } = message.payload;
+                    const [{result}] = await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: (selector, newContent) => {
+                            const element = document.querySelector(selector);
+                            if (!element) {
+                                return { success: false, message: `Element not found: ${selector}` };
+                            }
+                            
+                            try {
+                                element.innerHTML = newContent;
+                                return { success: true, message: `Successfully updated element matching: ${selector}` };
+                            } catch (error) {
+                                return { success: false, message: `Error updating element: ${error.message}` };
+                            }
+                        },
+                        args: [selector, newContent]
+                    });
+                    
+                    ws.send(JSON.stringify({ 
+                        result: result.message 
+                    }));
+                } else {
+                    // Default: Execute script to get page source
+                    const [{result}] = await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: () => document.documentElement.outerHTML
+                    });
 
-                ws.send(JSON.stringify({ 
-                    source: result 
-                }));
+                    ws.send(JSON.stringify({ 
+                        source: result 
+                    }));
+                }
             } catch (error) {
-                console.error('Error getting page source:', error);
+                console.error('Error processing message:', error);
                 ws.send(JSON.stringify({ 
                     error: error.message 
                 }));
@@ -118,6 +146,43 @@ async function handleMcpQuery({ query, code, language }) {
     // Check if this is a GET_PAGE_SOURCE request
     if (query === 'GET_PAGE_SOURCE') {
         return await getPageSource();
+    }
+    // Check if this is an UPDATE_HTML request
+    else if (query === 'UPDATE_HTML' && code && language === 'selector') {
+        try {
+            // Parse the code as JSON containing selector and newContent
+            const { selector, newContent } = JSON.parse(code);
+            
+            // Get the active tab
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            
+            if (!tab) {
+                throw new Error('No active tab found');
+            }
+
+            // Execute script to update HTML content
+            const [{result}] = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: (selector, newContent) => {
+                    const element = document.querySelector(selector);
+                    if (!element) {
+                        return { success: false, message: `Element not found: ${selector}` };
+                    }
+                    
+                    try {
+                        element.innerHTML = newContent;
+                        return { success: true, message: `Successfully updated element matching: ${selector}` };
+                    } catch (error) {
+                        return { success: false, message: `Error updating element: ${error.message}` };
+                    }
+                },
+                args: [selector, newContent]
+            });
+
+            return result.message;
+        } catch (error) {
+            throw new Error(`Failed to update HTML: ${error.message}`);
+        }
     }
     
     // Otherwise, do a simple text search

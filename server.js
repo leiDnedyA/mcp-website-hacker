@@ -124,6 +124,146 @@ server.tool("query_current_page",
     }
 );
 
+// Add update HTML content tool with proper namespacing
+server.tool("mcp_chrome_tab_update_element_html",
+    {
+        selector: z.string().describe("CSS selector for the element to update"),
+        newContent: z.string().describe("New HTML content to set for the element")
+    },
+    async ({ selector, newContent }) => {
+        if (activeConnections.size === 0) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "Error: Chrome extension not connected. Please ensure the extension is running."
+                }]
+            };
+        }
+
+        try {
+            // Get first available connection
+            const activeConnection = [...activeConnections][0];
+
+            // Send update request to Chrome extension
+            const result = await new Promise((resolve, reject) => {
+                // Check if connection is still valid
+                if (!safelySendMessage(activeConnection, { 
+                    type: 'UPDATE_HTML', 
+                    payload: { selector, newContent } 
+                })) {
+                    return reject(new Error('Failed to send message to extension'));
+                }
+
+                const timeout = setTimeout(() => {
+                    // Remove the message handler to avoid memory leaks
+                    activeConnection.removeListener('message', messageHandler);
+                    reject(new Error('Timeout waiting for update response'));
+                }, 5000);
+
+                const messageHandler = (data) => {
+                    clearTimeout(timeout);
+                    try {
+                        const response = JSON.parse(data.toString());
+                        if (response.error) {
+                            reject(new Error(response.error));
+                        } else {
+                            resolve(response.result);
+                        }
+                    } catch (error) {
+                        reject(new Error(`Invalid response format: ${error.message}`));
+                    }
+                };
+
+                activeConnection.once('message', messageHandler);
+            });
+
+            return {
+                content: [{
+                    type: "text",
+                    text: result
+                }]
+            };
+        } catch (error) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error updating element: ${error.message}`
+                }]
+            };
+        }
+    }
+);
+
+// Keep the original update_page_element tool for backward compatibility
+server.tool("update_page_element",
+    {
+        selector: z.string().describe("CSS selector for the element to update"),
+        newContent: z.string().describe("New HTML content to set for the element")
+    },
+    async ({ selector, newContent }) => {
+        if (activeConnections.size === 0) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "Error: Chrome extension not connected. Please ensure the extension is running."
+                }]
+            };
+        }
+
+        try {
+            // Get first available connection
+            const activeConnection = [...activeConnections][0];
+
+            // Send update request to Chrome extension
+            const result = await new Promise((resolve, reject) => {
+                // Check if connection is still valid
+                if (!safelySendMessage(activeConnection, { 
+                    type: 'UPDATE_HTML', 
+                    payload: { selector, newContent } 
+                })) {
+                    return reject(new Error('Failed to send message to extension'));
+                }
+
+                const timeout = setTimeout(() => {
+                    // Remove the message handler to avoid memory leaks
+                    activeConnection.removeListener('message', messageHandler);
+                    reject(new Error('Timeout waiting for update response'));
+                }, 5000);
+
+                const messageHandler = (data) => {
+                    clearTimeout(timeout);
+                    try {
+                        const response = JSON.parse(data.toString());
+                        if (response.error) {
+                            reject(new Error(response.error));
+                        } else {
+                            resolve(response.result);
+                        }
+                    } catch (error) {
+                        reject(new Error(`Invalid response format: ${error.message}`));
+                    }
+                };
+
+                activeConnection.once('message', messageHandler);
+            });
+
+            return {
+                content: [{
+                    type: "text",
+                    text: result
+                }]
+            };
+        } catch (error) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error updating element: ${error.message}`
+                }]
+            };
+        }
+    }
+);
+
 // Start receiving messages on stdin and sending messages on stdout
 const transport = new StdioServerTransport();
 await server.connect(transport); 
